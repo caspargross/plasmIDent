@@ -1,12 +1,34 @@
-#!usr/bin/env Rscript
+#!/usr/bin/env Rscript
 
 ######################
 # Create CIRCOS data #
 #  tracks from rgi   #
 ######################
 
-library(seqinr)
-source("00_functions.R")
+require(data.table)
+
+readGff <- function(fileName, sep='=') {
+  
+  dt <- fread(fileName, header=F)  
+  dt <- na.omit(dt)
+
+  setnames(dt, c("seqname", "source", "feature", "start", "end", "score", "strand", "frame", "attribute"))
+  att <- dt[,tstrsplit(attribute, ';')]
+  
+  
+  # Extract column names 
+  att_names <- unname(unlist(att[1, .(sapply(.SD, function(x) {tstrsplit(trimws(x), sep)[[1]][1]})),]))
+  setnames(att, att_names)
+  att_names <- att_names[!is.na(att_names)]
+  
+  # Combine data.tables
+  att[,(att_names) := sapply(.SD, function(x) {tstrsplit(trimws(x), sep, fixed = T, keep=2)}), .SDcols = att_names]
+
+  dt <- cbind(dt[,!"attribute"], att[, ..att_names])
+  
+  return(dt)
+}
+
 
 args = commandArgs(trailingOnly=TRUE)
 file = args[1]

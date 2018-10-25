@@ -35,8 +35,8 @@ Processes:
 
 samples = Channel.from([id: "S1221_pl",
     assembly: "${workflow.projectDir}/data/testAssembly.fasta",
-    lr: "${workflow.projectDir}/data/testReads_nanopore.fastq"]
-    ).view()
+    lr: "${workflow.projectDir}/data/testReads_nanopore.fastq"] )
+//  .view()
 
 window = 50
 
@@ -81,20 +81,6 @@ process identify_resistance_genes {
     """
 }
 
-process format_data_rgi {
-// Converts gff file to circos readable format    
-    input:
-    set id, gff from rgi_gff_fixed
-
-    output:
-    set id, file("rgi.txt"), file("rgi_span.txt") into circos_data_rgi
-
-    script:
-    """
-    Rscript 02_create_rgi_circos.R ${gff}
-    """
-}
-
 process rename_annotations {
 // Fixes contig names in the gff file. 
     //publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
@@ -108,6 +94,20 @@ process rename_annotations {
     script:
     """
     sed 's/_[0-9]*//' ${gff} > ${id}_rgi_fixed.gff3
+    """
+}
+
+process format_data_rgi {
+// Converts gff file to circos readable format    
+    input:
+    set id, gff from rgi_gff_fixed
+
+    output:
+    set id, file("rgi.txt"), file("rgi_span.txt") into circos_data_rgi
+
+    script:
+    """
+    02_create_rgi_circos.R ${gff}
     """
 }
 
@@ -150,17 +150,51 @@ process calcGC{
     publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
 
     input:
-    set id, assembly, aln_lr, aln_lr_idx from samples_gc
+    set id, assembly, lr from samples_gc
     
     output:
     set id, file('gc50.txt'), file('gc1000.txt') into circos_data_gc
 
     script:
     """
-    Rscript 01_calculate_GC.R ${assembly} 
+    01_calculate_GC.R ${assembly} 
     """
 }
 
-//Split fasta into single contigs
-contigs = Channel.create()
+// Combine all finished circos data based on the id
+circos_data_gc
+   .join(circos_data_cov)
+       .join(circos_data_rgi)
+       .set{circos_data}
+// id | gc50 | gc1000 | cov | rgi | rgi_span
 
+//Split fasta into single contigs and calculate their length
+samples_split
+    .map{[
+        it['id'],
+        file(it.get('assembly'))
+        ]}
+    .splitFasta(record: [id: true, seqString: true])
+    .map{
+        def id = it[0]
+        def contigName = it[1]['id']
+        def length = it[1]['seqString'].length()
+
+        [id, contigName, length]
+        }
+    .set{contigs}
+
+// Combine contig data with sample wide circos data
+combined_data = circos_data.combine(contigs, by: 0)
+
+process circos{
+// Use the combined data to create nice circos plots
+
+
+
+
+
+
+
+
+}
