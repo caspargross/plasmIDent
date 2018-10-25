@@ -33,7 +33,7 @@ Processes:
 */
 
 
-samples = Channel.from([id: "ESBl1991",
+samples = Channel.from([id: "S1221_pl",
     assembly: "${workflow.projectDir}/data/testAssembly.fasta",
     lr: "${workflow.projectDir}/data/testReads_nanopore.fastq"]
     ).view()
@@ -42,11 +42,11 @@ window = 50
 
 
 // Duplicate channel
-samples.into{samples_map; samples_rgi}
+samples.into{samples_map; samples_rgi; samples_gc; samples_split}
 
 // Take assembly and split into main chromosome and supposed plasmids
 process map_longreads {
-    publishDir "${params.outFolder}/${id}"
+    publishDir "${params.outFolder}/${id}", mode: 'copy'
 
     input:
     set id, assembly, lr from samples_map
@@ -65,47 +65,62 @@ process map_longreads {
 
 
 process identify_resistance_genes {
-    publishDir "${params.outFolder}/rgi/"
+    publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
     
     input:
     set id, assembly, lr from samples_rgi
     
 
     output:
-    file("resistances.gff3") into rgi_gff
+    set id, file("${id}_rgi.gff3") into rgi_gff
 
     script:
     """
-    ${RGI} -i ${assembly} -n ${params.cpu} -o resistances
+    ${RGI} -i ${assembly} -n ${params.cpu} -o ${id}_rgi
 
     """
 }
 
-// The gff file produced by rgi has wrong contig names. 
-// After this script they can be load directly into a genome viewer.
-process rename_annotations {
-    publishDir "${params.outFolder}/rgix/"
-
+process format_data_rgi {
+// Converts gff file to circos readable format    
     input:
-    file(gff) from rgi_gff
-    
+    set id, gff from rgi_gff_fixed
+
     output:
-    file("res_annot.gff3")
+    set id, file("rgi.txt"), file("rgi_span.txt") into circos_data_rgi
 
     script:
     """
-    sed 's/_[0-9]*//' ${gff} > res_annot.gff3
+    Rscript 02_create_rgi_circos.R ${gff}
+    """
+}
+
+process rename_annotations {
+// Fixes contig names in the gff file. 
+    //publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
+
+    input:
+    set id, file(gff) from rgi_gff
+    
+    output:
+    set id, file("${id}_rgi_fixed.gff3") into rgi_gff_fixed
+
+    script:
+    """
+    sed 's/_[0-9]*//' ${gff} > ${id}_rgi_fixed.gff3
     """
 }
 
 process mos_depth{
-    publishDir "${params.outFolder}/depth"
+// Calculate coverage depth
+    publishDir "${params.outFolder}/${id}/depth", mode: 'copy'
 
     input:
-    set id, assembly, aln_lr, aln_lr_idx from  mos_depth
+    set id, assembly, aln_lr, aln_lr_idx from mos_depth
 
     output:
     file("${id}*")
+    set id, file("${id}.regions.bed.gz") into cov_regions
 
     script:
     """
@@ -114,3 +129,38 @@ process mos_depth{
     """
 
 }
+
+process format_data_cov{
+// Formats coverage data for use in circos
+    
+    input:
+    set id, bed from cov_regions
+
+    output:
+    set id, file("cov.bed") into circos_data_cov
+
+    script:
+    """
+    gunzip -c ${bed} > cov.bed
+    """
+}
+
+process calcGC{
+// Calculate gc conten
+    publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
+
+    input:
+    set id, assembly, aln_lr, aln_lr_idx from samples_gc
+    
+    output:
+    set id, file('gc50.txt'), file('gc1000.txt') into circos_data_gc
+
+    script:
+    """
+    Rscript 01_calculate_GC.R ${assembly} 
+    """
+}
+
+//Split fasta into single contigs
+contigs = Channel.create()
+
