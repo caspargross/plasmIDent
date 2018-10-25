@@ -9,108 +9,66 @@
 * 
 **/
 
-// Run parameter:
-params.assembler = "unicycler"
-params.folder_suffix = "_all"
-
-// Arguments:
-files = Channel.fromPath(params.pathfile)
-    .ifEmpty {error "Cannot find file with path locations in ${params.pathfile}"}
-    .splitCsv(header: true)
-    .view()
+// Input for each sample/assembly:
+// 1) ID (ESBL1991_unicycler)
+// 2) Assembly (ESBL1991_final_assembly.fasta)
+// 3) Long reads (ESBL1991_nanopore.fastq)
 
 
-// Filter contigs by length:
-process contig_length_table {
-    tag{id}
-    publishDir "${params.outFolder}/${id}/"
+/* 
 
-    input:
-    set id, sr1, sr2, lr from files
-    
-    output:
-    set id, sr1, sr2, lr, file("plasmid*.fasta") into plasmids
+Processes:
 
-    script:
-    """
-    #!/usr/bin/Rscript
+- Map longreads with minimap2
+- Find resistance genes with rgi
+- Calculate coverage depth with mosdepth
+- Calculate GC content with own R-Script
+- Split into contigs
+- Filter contigs for max/min length
+- Identify gapcloser reads with own tools
+- Calculate barstacking
+- Write circos data
+- Create circos plot
 
-    library(seqinr)
-    library(data.table)
+*/
 
-    genome <- read.fasta("${params.inFolder}/${id}${params.folder_suffix}/${id}_${params.assembler}_final.fasta")
-    
-    # Calculate contig lengths
-    dt <- data.table(file='${id}_${params.assembler}',
-        length = lapply(genome, length),
-        contig = lapply(genome, function(x) attributes(x)\$name)
-    )
 
-    # Write contig lengths to file
-    fwrite(dt, file = 'contig_lengths.csv')
-     
-    # Filter contigs for length and extract into new file
-    selection <- dt[length>${params.minLength} & length<${params.maxLength},,]
+samples = Channel.from([id: "ESBl1991",
+    assembly: "${workflow.projectDir}/data/testAssembly.fasta",
+    lr: "${workflow.projectDir}/data/testReads_nanopore.fastq"]
+    ).view()
 
-    for (i in 1:nrow(selection)) {
-        contig = genome[selection\$contig[[i]]]
-        write.fasta(sequences=contig, names=names(contig), file.out=paste0('plasmid',i,'.fasta'))
-    }
+window = 50
 
-    """
-
-}
 
 // Duplicate channel
-plasmids.into{plasmids_lr; plasmids_sr}
+samples.into{samples_map; samples_rgi}
 
 // Take assembly and split into main chromosome and supposed plasmids
 process map_longreads {
     publishDir "${params.outFolder}/${id}"
 
     input:
-    set id, sr1, sr2, lr, contig from plasmids_lr.transpose()
+    set id, assembly, lr from samples_map
 
-    file_name = "aln_" + contig.baseName + "_" + id + "_lr"
 
     output:
-    file(file_name + '.bam') into aln_lr
-    file(file_name + '.bai')
+    set id, assembly, file("${id}_lr.bam"), file("${id}_lr.bai") into mos_depth
 
     script:
     """
-    ${MINIMAP2} -ax map-ont -t ${params.cpu} ${contig} ${lr} \
-    | ${SAMTOOLS} sort  -o ${file_name}.bam 
-    ${SAMTOOLS} index ${file_name}.bam ${file_name}.bai
+    minimap2 -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
+    | samtools sort | samtools view -b -F 4 -o  ${id}_lr.bam 
+    samtools index ${id}_lr.bam ${id}_lr.bai
     """
 }
 
-process map_shortreads {
-    publishDir "${params.outFolder}/sr_alignment/"
-
-    input:
-    set id, sr1, sr2, lr, plasmid from contigs_sr.transpose()
-
-    output:
-    file('alignment_lr.bam') into mappedShortReads
-    file('alignment_lr.bai')
-
-    script:
-    """
-    ${BWA} index ${plasmid}
-    ${BWA} aln ${plasmid} ${sr1} > R1.sai
-    ${BWA} aln ${plasmid} ${sr2} > R2.sai
-    ${BWA} sampe ${plasmid} R1.sai R2.sai ${sr1} ${sr2} \
-    | ${SAMTOOLS} sort -o alignment_sr.bam
-    ${SAMTOOLS} index alignment_sr.bam alignment_sr.bai
-    """
-
-}
 
 process identify_resistance_genes {
     publishDir "${params.outFolder}/rgi/"
     
     input:
+    set id, assembly, lr from samples_rgi
     
 
     output:
@@ -118,7 +76,7 @@ process identify_resistance_genes {
 
     script:
     """
-    ${RGI} -i ${params.genome} -n ${params.cpu} -o resistances
+    ${RGI} -i ${assembly} -n ${params.cpu} -o resistances
 
     """
 }
@@ -126,7 +84,7 @@ process identify_resistance_genes {
 // The gff file produced by rgi has wrong contig names. 
 // After this script they can be load directly into a genome viewer.
 process rename_annotations {
-    publishDir "${params.outFolder}/rgi/"
+    publishDir "${params.outFolder}/rgix/"
 
     input:
     file(gff) from rgi_gff
@@ -138,4 +96,21 @@ process rename_annotations {
     """
     sed 's/_[0-9]*//' ${gff} > res_annot.gff3
     """
+}
+
+process mos_depth{
+    publishDir "${params.outFolder}/depth"
+
+    input:
+    set id, assembly, aln_lr, aln_lr_idx from  mos_depth
+
+    output:
+    file("${id}*")
+
+    script:
+    """
+    source activate mosdepth
+    mosdepth -t ${params.cpu} -n -b ${window} ${id} ${aln_lr} 
+    """
+
 }
