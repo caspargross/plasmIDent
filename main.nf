@@ -185,16 +185,25 @@ samples_split
     .set{contigs}
 
 // Combine contig data with sample wide circos data
-combined_data = circos_data.combine(contigs, by: 0)
+combined_data = contigs.combine(circos_data, by: 0)
+//    .view()
 
 process circos{
 // Use the combined data to create nice circos plots
+publishDir "${params.outFolder}/${id}/plasmidPlots", mode: 'copy'
 
+input:
+set id, contigID, length, file(gc50), file(gc1000), file(cov), file(rgi), file(rgi_span) from combined_data
 
+output:
+file("${id}_${contigID}_plasmid.*")
 
-
-
-
-
-
+script:
+"""
+echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
+ln -s ${workflow.projectDir}/circos_confs/* .
+circos
+mv circos.png ${id}_${contigID}_plasmid.png
+mv circos.svg ${id}_${contigID}_plasmid.svg
+"""
 }
