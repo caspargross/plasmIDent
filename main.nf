@@ -15,22 +15,6 @@
 // 3) Long reads (ESBL1991_nanopore.fastq)
 
 
-/* 
-
-Processes:
-
-- Map longreads with minimap2
-- Find resistance genes with rgi
-- Calculate coverage depth with mosdepth
-- Calculate GC content with own R-Script
-- Split into contigs
-- Filter contigs for max/min length
-- Identify gapcloser reads with own tools
-- Calculate barstacking
-- Write circos data
-- Create circos plot
-
-*/
 
 ovlp = 3000
 params.maxLength = 500000
@@ -43,7 +27,7 @@ samples = Channel.from([id: "03",
     .view()
 
 // Duplicate channel
-samples.into{samples_rgi; samples_gc; samples_split}
+samples.into{samples_rgi; samples_gc; samples_split; samples_map; samples_table}
 
 // Split into contigs and filter for length channel
 samples_split
@@ -67,7 +51,7 @@ samples_split
 
 process pad_plasmids {
 // Add prefix and suffix with sequence from oppsig end to each plasmid
-    tag{id}
+    tag{contigName}
 
     input: 
     set id, lr, contigName, length, sequence from contigs_2
@@ -88,28 +72,57 @@ process pad_plasmids {
     '''
 }
 
-
-// Take assembly and split into main chromosome and supposed plasmids
-process map_longreads {
-    publishDir "${params.outFolder}/${id}", mode: 'copy'
-    tag{id}
+process combine_padded_contigs {
+// Recombines padded contigs into a single fasta
+    tag{contigName}
 
     input:
     set id, assembly, lr, contigName from contigs_padded.groupTuple()
 
     output:
-    set id, file("${id}_padded.fasta"), file("${id}_lr.bam"), file("${id}_lr.bai") into bam_lr
+    set id, file("${id}_padded.fasta"), lr, val("padded") into map_padded
 
     script:
     """
     cat \$(echo ${assembly} | tr -d '[],') > ${id}_padded.fasta 
-    LR=\$(echo ${lr} | tr -d '[],' | xargs -n 1 | uniq )
-    minimap2 -ax map-ont -t ${params.cpu} ${id}_padded.fasta \$LR \
+    """
+}
+
+// Mix channel with padded and normal contigs
+samples_map
+  //.view()
+    .map{[it['id'], 
+        it['assembly'], 
+        it['lr'], 
+        'normal']}
+    .mix(map_padded
+        .map{[it[0], 
+            it[1], 
+            it[2][1],
+            it[3]]})
+  //.view()
+    .set{to_mapping}
+
+process map_longreads {
+// Use minimap2 to align longreads to padded contigs
+    tag{id}
+
+    input:
+    set id, assembly, lr, type from to_mapping
+
+    output:
+    set id, assembly, type, file("${id}_lr.bam"), file("${id}_lr.bai") into bam_lr
+
+    script:
+    """
+    minimap2 -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
     | samtools sort | samtools view -b -F 4 -o  ${id}_lr.bam 
     samtools index ${id}_lr.bam ${id}_lr.bai
     """
 }
 
+bam_cov = Channel.create()
+bam_ovlp = Channel.create()
 bam_lr.into{bam_cov; bam_ovlp}
 
 process find_ovlp_reads {
@@ -117,7 +130,7 @@ process find_ovlp_reads {
     tag{contig_name}
 
     input:
-    set id, lr, contig_name, length, seq, assembly, bam, bai from contigs.combine(bam_ovlp, by : 0)
+    set id, lr, contig_name, length, seq, assembly, type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
     output:
     set id, contig_name, length, file("reads.txt"), file("ovlp.txt") into circos_reads 
 
@@ -127,8 +140,8 @@ process find_ovlp_reads {
     echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} - 10)'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
     echo -e ${contig_name}'\\t'\$(expr ${length} - ${params.seqPadding} - 10)'\\t'\$(expr ${length} - ${params.seqPadding} + 10) >> breaks.bed
     bedtools intersect -a reads.bed -b breaks.bed -wa > ovlp.bed
-    03_prepare_reads.R ovlp.bed ${contig_name} ${length} ${params.seqPadding} ovlp.txt TRUE
-    03_prepare_reads.R reads.bed ${contig_name} ${length} ${params.seqPadding} reads.txt FALSE
+    03_prepare_bed.R ovlp.bed ${params.seqPadding} ovlp.txt ${contig_name} ${length} TRUE
+    03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt  ${contig_name} ${length} FALSE
     """
 }
 
@@ -140,7 +153,7 @@ process identify_resistance_genes {
     set id, assembly, lr from samples_rgi
     
     output:
-    set id, file("${id}_rgi.txt") into rgi_txt
+    set id, file("${id}_rgi.txt") into from_rgi
 
     script:
     """
@@ -149,31 +162,20 @@ process identify_resistance_genes {
     """
 }
 
-process rename_annotations {
-// Fixes contig names in the gff file. 
-    input:
-    set id, file(gff) from rgi_txt
-    
-    output:
-    set id, file("${id}_rgi_fixed.txt") into rgi_gff_fixed
+from_rgi.into{rgi_txt; table_data_rgi}
 
-    script:
-    """
-    sed 's/_[0-9]*//' ${gff} > ${id}_rgi_fixed.txt
-    """
-}
 
 process format_data_rgi {
 // Converts gff file to circos readable format    
     input:
-    set id, gff from rgi_gff_fixed
+    set id, rgi from rgi_txt
 
     output:
     set id, file("rgi.txt"), file("rgi_span.txt") into circos_data_rgi
 
     script:
     """
-    02_create_rgi_circos.R ${gff}
+    02_create_rgi_circos.R ${rgi}
     """
 }
 
@@ -182,34 +184,43 @@ process mos_depth {
     publishDir "${params.outFolder}/${id}/depth", mode: 'copy'
 
     input:
-    set id, assembly, aln_lr, aln_lr_idx from bam_cov
+    set id, assembly, type, aln_lr, aln_lr_idx from bam_cov
 
     output:
     file("${id}*")
-    set id, file("${id}.regions.bed.gz") into cov_regions
+    set id, file("${id}.regions.bed.gz"), type into cov_bed
 
     script:
     """
     source activate mosdepth
     mosdepth -t ${params.cpu} -n -b ${window} ${id} ${aln_lr} 
     """
-
 }
 
 process format_data_cov {
 // Formats coverage data for use in circos
     
     input:
-    set id, bed from cov_regions
+    set id, bed, type from cov_bed
 
     output:
-    set id, file("cov.bed") into circos_data_cov
+    set id, file("cov.txt"), type into cov_formated
 
     script:
-    """
-    gunzip -c ${bed} > cov.bed
-    """
+    if (type == "padded")
+        """
+        gunzip -c ${bed} > cov.bed
+        03_prepare_bed.R cov.bed  ${params.seqPadding} cov.txt
+        """
+    else
+        """
+        gunzip -c ${bed} > cov.txt
+        """
 }
+
+circos_data_cov = Channel.create()
+table_data_cov = Channel.create()
+cov_formated.choice(circos_data_cov, table_data_cov) { it[2] == 'padded' ? 0 : 1 }
 
 process calcGC {
 // Calculate gc conten
@@ -219,6 +230,7 @@ process calcGC {
     set id, assembly, lr from samples_gc
     
     output:
+    set id, file('gc1000.txt'), assembly into table_data_gc
     set id, file('gc50.txt'), file('gc1000.txt') into circos_data_gc
 
     script:
@@ -234,27 +246,49 @@ circos_data_gc
        .set{circos_data}
 // id | gc50 | gc1000 | cov | rgi | rgi_span
 
-
 // Combine contig data with sample wide circos data
 combined_data = circos_reads.combine(circos_data, by: 0)
 
+// Combine all table data based on id
+table_data_gc
+    .join(table_data_cov)
+        .join(table_data_rgi)
+        .set{table_data}
+
 process circos{
 // Use the combined data to create nice circos plots
-publishDir "${params.outFolder}/${id}/plasmidPlots", mode: 'copy'
+    publishDir "${params.outFolder}/${id}/plasmidPlots", mode: 'copy'
+    tag{contigID}
 
-input:
-set id, contigID, length, file(reads), file(ovlp),  file(gc50), file(gc1000), file(cov), file(rgi), file(rgi_span) from combined_data
+    input:
+    set id, contigID, length, file(reads), file(ovlp), file(gc50), file(gc1000), file(cov), type, file(rgi), file(rgi_span) from combined_data
 
-output:
-file("${id}_${contigID}_plasmid.*")
+    output:
+    file("${id}_${contigID}_plasmid.*")
 
-script:
-"""
-echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
-ln -s ${workflow.projectDir}/circos_confs//* .
-circos
-mv circos.png ${id}_${contigID}_plasmid.png
-mv circos.svg ${id}_${contigID}_plasmid.svg
-"""
+    script:
+    """
+    echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
+    ln -s ${workflow.projectDir}/circos_confs//* .
+    circos
+    mv circos.png ${id}_${contigID}_plasmid.png
+    mv circos.svg ${id}_${contigID}_plasmid.svg
+    """
 }
 
+process table{
+// Create table with contig informations
+    publishDir "${params.outFolder}/${id}/", mode: 'copy'
+
+    input:
+    set id, gc, assembly, cov, type, rgi from table_data
+
+    output:
+    file("${id}_summary.csv")
+
+    script:
+    """
+    cp ${gc} ${assembly} ${cov} ${rgi} .
+    touch ${id}_summary.csv
+    """
+}

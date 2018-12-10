@@ -11,6 +11,8 @@ args <- commandArgs(trailingOnly=TRUE)
 file <- args[1]
 rgi <- fread(file)
 
+rgi[, Contig := tstrsplit(Contig, "_")[[1]],]
+
 
 # Export RGI
 fwrite(rgi[,.(Contig, Start, Stop, Best_Hit_ARO)], sep="\t", file ="rgi.txt", col.names = F)
