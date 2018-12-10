@@ -32,68 +32,134 @@ Processes:
 
 */
 
-
-samples = Channel.from([id: "S1221_pl",
-    assembly: "${workflow.projectDir}/data/testAssembly.fasta",
-    lr: "${workflow.projectDir}/data/testReads_nanopore.fastq"] )
-//  .view()
-
+ovlp = 3000
+params.maxLength = 500000
+params.seqPadding = 3000
 window = 50
 
+samples = Channel.from([id: "03",
+    assembly: "${workflow.projectDir}/data/VRE_assembly.fasta",
+    lr: "${workflow.projectDir}/data/VRE_reads.fastq"] )
+    .view()
 
 // Duplicate channel
-samples.into{samples_map; samples_rgi; samples_gc; samples_split}
+samples.into{samples_rgi; samples_gc; samples_split}
+
+// Split into contigs and filter for length channel
+samples_split
+    .map{[
+        it['id'],
+        file(it.get('assembly')),
+        it['lr']
+        ]}
+    .splitFasta(record: [id: true, seqString: true])
+    .map{
+        def id = it[0]
+        def lr = it[2]
+        def contigName = it[1]['id']
+        def length = it[1]['seqString'].length()
+        def sequence = it[1]['seqString']
+        [id, lr, contigName, length, sequence]
+       }
+    .filter{it[3] < params.maxLength}
+    .into{contigs; contigs_2}
+
+
+process pad_plasmids {
+// Add prefix and suffix with sequence from oppsig end to each plasmid
+    tag{id}
+
+    input: 
+    set id, lr, contigName, length, sequence from contigs_2
+
+    output: 
+    set id, file("${id}_${contigName}_padded.fasta"), lr, contigName into contigs_padded
+    
+    shell:
+    '''
+    echo '>!{contigName}' >  !{id}_!{contigName}_padded.fasta
+
+    echo !{sequence} | awk '{print \
+        substr($1, length($1)-(!{params.seqPadding} - 1), length($1))\
+        $1 \
+        substr($1, 1, !{params.seqPadding})\
+        }' >> !{id}_!{contigName}_padded.fasta
+
+    '''
+}
+
 
 // Take assembly and split into main chromosome and supposed plasmids
 process map_longreads {
     publishDir "${params.outFolder}/${id}", mode: 'copy'
+    tag{id}
 
     input:
-    set id, assembly, lr from samples_map
-
+    set id, assembly, lr, contigName from contigs_padded.groupTuple()
 
     output:
-    set id, assembly, file("${id}_lr.bam"), file("${id}_lr.bai") into mos_depth
+    set id, file("${id}_padded.fasta"), file("${id}_lr.bam"), file("${id}_lr.bai") into bam_lr
 
     script:
     """
-    minimap2 -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
+    cat \$(echo ${assembly} | tr -d '[],') > ${id}_padded.fasta 
+    LR=\$(echo ${lr} | tr -d '[],' | xargs -n 1 | uniq )
+    minimap2 -ax map-ont -t ${params.cpu} ${id}_padded.fasta \$LR \
     | samtools sort | samtools view -b -F 4 -o  ${id}_lr.bam 
     samtools index ${id}_lr.bam ${id}_lr.bai
     """
 }
 
+bam_lr.into{bam_cov; bam_ovlp}
 
-process identify_resistance_genes {
-    publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
-    
+process find_ovlp_reads {
+// Creates circos file from bam, uses R script to find overlapping reads
+    tag{contig_name}
+
     input:
-    set id, assembly, lr from samples_rgi
-    
-
+    set id, lr, contig_name, length, seq, assembly, bam, bai from contigs.combine(bam_ovlp, by : 0)
     output:
-    set id, file("${id}_rgi.gff3") into rgi_gff
+    set id, contig_name, length, file("reads.txt"), file("ovlp.txt") into circos_reads 
 
     script:
     """
-    ${RGI} -i ${assembly} -n ${params.cpu} -o ${id}_rgi
+    bedtools bamtobed -i ${bam} > reads.bed
+    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} - 10)'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${length} - ${params.seqPadding} - 10)'\\t'\$(expr ${length} - ${params.seqPadding} + 10) >> breaks.bed
+    bedtools intersect -a reads.bed -b breaks.bed -wa > ovlp.bed
+    03_prepare_reads.R ovlp.bed ${contig_name} ${length} ${params.seqPadding} ovlp.txt TRUE
+    03_prepare_reads.R reads.bed ${contig_name} ${length} ${params.seqPadding} reads.txt FALSE
+    """
+}
 
+process identify_resistance_genes {
+    publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
+    tag{id}
+
+    input:
+    set id, assembly, lr from samples_rgi
+    
+    output:
+    set id, file("${id}_rgi.txt") into rgi_txt
+
+    script:
+    """
+    source activate rgi
+    rgi main -i ${assembly} -n ${params.cpu} -o ${id}_rgi
     """
 }
 
 process rename_annotations {
 // Fixes contig names in the gff file. 
-    //publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
-
     input:
-    set id, file(gff) from rgi_gff
+    set id, file(gff) from rgi_txt
     
     output:
-    set id, file("${id}_rgi_fixed.gff3") into rgi_gff_fixed
+    set id, file("${id}_rgi_fixed.txt") into rgi_gff_fixed
 
     script:
     """
-    sed 's/_[0-9]*//' ${gff} > ${id}_rgi_fixed.gff3
+    sed 's/_[0-9]*//' ${gff} > ${id}_rgi_fixed.txt
     """
 }
 
@@ -111,12 +177,12 @@ process format_data_rgi {
     """
 }
 
-process mos_depth{
+process mos_depth {
 // Calculate coverage depth
     publishDir "${params.outFolder}/${id}/depth", mode: 'copy'
 
     input:
-    set id, assembly, aln_lr, aln_lr_idx from mos_depth
+    set id, assembly, aln_lr, aln_lr_idx from bam_cov
 
     output:
     file("${id}*")
@@ -130,7 +196,7 @@ process mos_depth{
 
 }
 
-process format_data_cov{
+process format_data_cov {
 // Formats coverage data for use in circos
     
     input:
@@ -145,9 +211,9 @@ process format_data_cov{
     """
 }
 
-process calcGC{
+process calcGC {
 // Calculate gc conten
-    publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
+   publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
 
     input:
     set id, assembly, lr from samples_gc
@@ -168,32 +234,16 @@ circos_data_gc
        .set{circos_data}
 // id | gc50 | gc1000 | cov | rgi | rgi_span
 
-//Split fasta into single contigs and calculate their length
-samples_split
-    .map{[
-        it['id'],
-        file(it.get('assembly'))
-        ]}
-    .splitFasta(record: [id: true, seqString: true])
-    .map{
-        def id = it[0]
-        def contigName = it[1]['id']
-        def length = it[1]['seqString'].length()
-
-        [id, contigName, length]
-        }
-    .set{contigs}
 
 // Combine contig data with sample wide circos data
-combined_data = contigs.combine(circos_data, by: 0)
-//    .view()
+combined_data = circos_reads.combine(circos_data, by: 0)
 
 process circos{
 // Use the combined data to create nice circos plots
 publishDir "${params.outFolder}/${id}/plasmidPlots", mode: 'copy'
 
 input:
-set id, contigID, length, file(gc50), file(gc1000), file(cov), file(rgi), file(rgi_span) from combined_data
+set id, contigID, length, file(reads), file(ovlp),  file(gc50), file(gc1000), file(cov), file(rgi), file(rgi_span) from combined_data
 
 output:
 file("${id}_${contigID}_plasmid.*")
@@ -201,9 +251,10 @@ file("${id}_${contigID}_plasmid.*")
 script:
 """
 echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
-ln -s ${workflow.projectDir}/circos_confs/* .
+ln -s ${workflow.projectDir}/circos_confs//* .
 circos
 mv circos.png ${id}_${contigID}_plasmid.png
 mv circos.svg ${id}_${contigID}_plasmid.svg
 """
 }
+
