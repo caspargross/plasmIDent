@@ -16,15 +16,12 @@
 
 
 
-ovlp = 3000
 params.maxLength = 500000
 params.seqPadding = 3000
-window = 50
+params.covWindow = 50
+params.input = "plasmid_files_test.tsv"
 
-samples = Channel.from([id: "03",
-    assembly: "${workflow.projectDir}/data/VRE_assembly.fasta",
-    lr: "${workflow.projectDir}/data/VRE_reads.fastq"] )
-    .view()
+samples = getFiles(params.input)
 
 // Duplicate channel
 samples.into{samples_rgi; samples_gc; samples_split; samples_map; samples_table}
@@ -46,6 +43,7 @@ samples_split
         [id, lr, contigName, length, sequence]
        }
     .filter{it[3] < params.maxLength}
+  //.view()
     .into{contigs; contigs_2}
 
 
@@ -105,22 +103,24 @@ samples_map
 
 process map_longreads {
 // Use minimap2 to align longreads to padded contigs
+    publishDir "${params.outFolder}/${id}/alignment/", mode: 'copy'
     tag{id}
 
     input:
     set id, assembly, lr, type from to_mapping
 
     output:
-    set id, assembly, type, file("${id}_lr.bam"), file("${id}_lr.bai") into bam_lr
+    set id, assembly, type, file("${id}_${type}_lr.bam"), file("${id}_${type}_lr.bai") into bam_lr
 
     script:
     """
     minimap2 -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
-    | samtools sort | samtools view -b -F 4 -o  ${id}_lr.bam 
-    samtools index ${id}_lr.bam ${id}_lr.bai
+    | samtools sort | samtools view -b -F 4 -o  ${id}_${type}_lr.bam 
+    samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bai
     """
 }
 
+// Distribute bamfiles for coverage and read overlap identification
 bam_cov = Channel.create()
 bam_ovlp = Channel.create()
 bam_lr.into{bam_cov; bam_ovlp}
@@ -131,6 +131,7 @@ process find_ovlp_reads {
 
     input:
     set id, lr, contig_name, length, seq, assembly, type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
+
     output:
     set id, contig_name, length, file("reads.txt"), file("ovlp.txt") into circos_reads 
 
@@ -146,7 +147,8 @@ process find_ovlp_reads {
 }
 
 process identify_resistance_genes {
-    publishDir "${params.outFolder}/${id}/rgi/", mode: 'copy'
+// Find antibiotic resistance genes in the CARD database
+    publishDir "${params.outFolder}/${id}/resistances", mode: 'copy'
     tag{id}
 
     input:
@@ -164,9 +166,10 @@ process identify_resistance_genes {
 
 from_rgi.into{rgi_txt; table_data_rgi}
 
-
 process format_data_rgi {
 // Converts gff file to circos readable format    
+    tag{id}
+
     input:
     set id, rgi from rgi_txt
 
@@ -181,7 +184,8 @@ process format_data_rgi {
 
 process mos_depth {
 // Calculate coverage depth
-    publishDir "${params.outFolder}/${id}/depth", mode: 'copy'
+    publishDir "${params.outFolder}/${id}/coverage", mode: 'copy'
+    tag{id}
 
     input:
     set id, assembly, type, aln_lr, aln_lr_idx from bam_cov
@@ -193,12 +197,13 @@ process mos_depth {
     script:
     """
     source activate mosdepth
-    mosdepth -t ${params.cpu} -n -b ${window} ${id} ${aln_lr} 
+    mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${id} ${aln_lr} 
     """
 }
 
 process format_data_cov {
 // Formats coverage data for use in circos
+    tag{id}
     
     input:
     set id, bed, type from cov_bed
@@ -218,13 +223,15 @@ process format_data_cov {
         """
 }
 
+// Distribute coverage file for circos (padded)  and summary table (normal)
 circos_data_cov = Channel.create()
 table_data_cov = Channel.create()
 cov_formated.choice(circos_data_cov, table_data_cov) { it[2] == 'padded' ? 0 : 1 }
 
 process calcGC {
 // Calculate gc conten
-   publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
+    publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
+    tag{id}
 
     input:
     set id, assembly, lr from samples_gc
@@ -244,7 +251,6 @@ circos_data_gc
    .join(circos_data_cov)
        .join(circos_data_rgi)
        .set{circos_data}
-// id | gc50 | gc1000 | cov | rgi | rgi_span
 
 // Combine contig data with sample wide circos data
 combined_data = circos_reads.combine(circos_data, by: 0)
@@ -256,8 +262,8 @@ table_data_gc
         .set{table_data}
 
 process circos{
-// Use the combined data to create nice circos plots
-    publishDir "${params.outFolder}/${id}/plasmidPlots", mode: 'copy'
+// Use the combined data to create circular plots
+    publishDir "${params.outFolder}/${id}/plots", mode: 'copy'
     tag{contigID}
 
     input:
@@ -288,7 +294,42 @@ process table{
 
     script:
     """
-    cp ${gc} ${assembly} ${cov} ${rgi} .
-    touch ${id}_summary.csv
+    04_summary_table.R ${assembly} ${rgi} ${cov} ${gc}
+    mv contig_summary.txt ${id}_summary.csv
     """
 }
+
+
+/*
+================================================================================
+=                               F U N C T I O N S                              =
+================================================================================
+*/
+
+def getFiles(tsvFile) {
+  // Extracts Read Files from TSV
+  log.info "Read input file: " + tsvFile
+  log.info "------------------------------"
+  Channel.fromPath(tsvFile)
+      .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
+      .splitCsv(sep:'\t', skip: 1)
+      .map { row ->
+            //def id = row[0]
+            //def assembly = returnFile(row[1])
+            //def lr = returnFile(row[2])
+            [id:row[0], assembly:returnFile(row[1]), lr:returnFile(row[2])]
+            }
+       .view()
+}
+
+def returnFile(it) {
+// Return file if it exists
+    if (workflow.profile in ['test', 'localtest'] ) {
+        inputFile = file("$workflow.projectDir/" + it)
+    } else {
+        inputFile = file(it)
+    }
+    if (!file(inputFile).exists()) exit 1, "Missing file in TSV file: ${inputFile}, see --help for more information"
+    return inputFile
+}
+
