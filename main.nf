@@ -9,17 +9,6 @@
 * 
 **/
 
-// Input for each sample/assembly:
-// 1) ID (ESBL1991_unicycler)
-// 2) Assembly (ESBL1991_final_assembly.fasta)
-// 3) Long reads (ESBL1991_nanopore.fastq)
-
-
-
-params.maxLength = 500000
-params.seqPadding = 3000
-params.covWindow = 50
-params.input = "plasmid_files_test.tsv"
 
 samples = getFiles(params.input)
 
@@ -49,7 +38,7 @@ samples_split
 
 process pad_plasmids {
 // Add prefix and suffix with sequence from oppsig end to each plasmid
-    tag{contigName}
+    tag{id + ":" + contigName}
 
     input: 
     set id, lr, contigName, length, sequence from contigs_2
@@ -72,7 +61,7 @@ process pad_plasmids {
 
 process combine_padded_contigs {
 // Recombines padded contigs into a single fasta
-    tag{contigName}
+    tag{id + ":" + contigName}
 
     input:
     set id, assembly, lr, contigName from contigs_padded.groupTuple()
@@ -103,7 +92,7 @@ samples_map
 
 process map_longreads {
 // Use minimap2 to align longreads to padded contigs
-    publishDir "${params.outFolder}/${id}/alignment/", mode: 'copy'
+    publishDir "${params.outDir}/${id}/alignment/", mode: 'copy'
     tag{id}
 
     input:
@@ -127,28 +116,40 @@ bam_lr.into{bam_cov; bam_ovlp}
 
 process find_ovlp_reads {
 // Creates circos file from bam, uses R script to find overlapping reads
-    tag{contig_name}
+    tag{id + ":" + contig_name}
 
     input:
-    set id, lr, contig_name, length, seq, assembly, type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
+    set id, lr, contig_name, length, seq, file(assembly), type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
 
     output:
-    set id, contig_name, length, file("reads.txt"), file("ovlp.txt") into circos_reads 
+    set id, contig_name, length, file("reads.txt"), file("ovlp.txt"), file("cov_ovlp.txt") into circos_reads 
 
     script:
     """
     bedtools bamtobed -i ${bam} > reads.bed
-    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} - 10)'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
     echo -e ${contig_name}'\\t'\$(expr ${length} - ${params.seqPadding} - 10)'\\t'\$(expr ${length} - ${params.seqPadding} + 10) >> breaks.bed
-    bedtools intersect -a reads.bed -b breaks.bed -wa > ovlp.bed
-    03_prepare_bed.R ovlp.bed ${params.seqPadding} ovlp.txt ${contig_name} ${length} TRUE
-    03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt  ${contig_name} ${length} FALSE
+    bedtools intersect -wa  -a reads.bed -b breaks.bed > ovlp.bed
+    
+    awk '{print \$4}' ovlp.bed | uniq -D | uniq > readID.txt
+    samtools view -H ${bam} > ovlp.sam 
+    samtools view ${bam} | grep -f readID.txt >> ovlp.sam || true
+    samtools view -b ovlp.sam > ovlp.bam
+    samtools index ovlp.bam
+    
+    source activate mosdepth
+    mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${contig_name} ovlp.bam
+    gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
+    
+    03_prepare_bed.R ovlp.bed ${params.seqPadding} ovlp.txt  TRUE FALSE ${contig_name} ${length}
+    03_prepare_bed.R cov_ovlp.bed 0 cov_ovlp.txt FALSE TRUE
+    03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt FALSE FALSE ${contig_name} ${length}
     """
 }
 
 process identify_resistance_genes {
 // Find antibiotic resistance genes in the CARD database
-    publishDir "${params.outFolder}/${id}/resistances", mode: 'copy'
+    publishDir "${params.outDir}/${id}/resistances", mode: 'copy'
     tag{id}
 
     input:
@@ -184,20 +185,21 @@ process format_data_rgi {
 
 process mos_depth {
 // Calculate coverage depth
-    publishDir "${params.outFolder}/${id}/coverage", mode: 'copy'
+    publishDir "${params.outDir}/${id}/coverage", mode: 'copy'
     tag{id}
 
     input:
     set id, assembly, type, aln_lr, aln_lr_idx from bam_cov
 
     output:
-    file("${id}*")
-    set id, file("${id}.regions.bed.gz"), type into cov_bed
+    file("${id}_cov_${type}.bed.gz")
+    set id, file("${id}_cov_${type}.bed.gz"), type into cov_bed
 
     script:
     """
     source activate mosdepth
     mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${id} ${aln_lr} 
+    mv ${id}.regions.bed.gz ${id}_cov_${type}.bed.gz
     """
 }
 
@@ -215,11 +217,12 @@ process format_data_cov {
     if (type == "padded")
         """
         gunzip -c ${bed} > cov.bed
-        03_prepare_bed.R cov.bed  ${params.seqPadding} cov.txt
+        03_prepare_bed.R cov.bed ${params.seqPadding} cov.txt FALSE TRUE
         """
     else
         """
-        gunzip -c ${bed} > cov.txt
+        gunzip -c ${bed} > cov.bed
+        03_prepare_bed.R cov.bed 0 cov.txt FALSE TRUE
         """
 }
 
@@ -230,7 +233,7 @@ cov_formated.choice(circos_data_cov, table_data_cov) { it[2] == 'padded' ? 0 : 1
 
 process calcGC {
 // Calculate gc conten
-    publishDir "${params.outFolder}/${id}/gc", mode: 'copy'
+    publishDir "${params.outDir}/${id}/gc", mode: 'copy'
     tag{id}
 
     input:
@@ -263,11 +266,11 @@ table_data_gc
 
 process circos{
 // Use the combined data to create circular plots
-    publishDir "${params.outFolder}/${id}/plots", mode: 'copy'
-    tag{contigID}
+    publishDir "${params.outDir}/${id}/plots", mode: 'copy'
+    tag{id + ":" + contigID}
 
     input:
-    set id, contigID, length, file(reads), file(ovlp), file(gc50), file(gc1000), file(cov), type, file(rgi), file(rgi_span) from combined_data
+    set id, contigID, length, file(reads), file(ovlp), file(cov_ovlp), file(gc50), file(gc1000), file(cov), type, file(rgi), file(rgi_span) from combined_data
 
     output:
     file("${id}_${contigID}_plasmid.*")
@@ -275,7 +278,7 @@ process circos{
     script:
     """
     echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
-    ln -s ${workflow.projectDir}/circos_confs//* .
+    ln -s ${workflow.projectDir}/conf/circos//* .
     circos
     mv circos.png ${id}_${contigID}_plasmid.png
     mv circos.svg ${id}_${contigID}_plasmid.svg
@@ -284,7 +287,8 @@ process circos{
 
 process table{
 // Create table with contig informations
-    publishDir "${params.outFolder}/${id}/", mode: 'copy'
+    publishDir "${params.outDir}/${id}/", mode: 'copy'
+    tag{id}
 
     input:
     set id, gc, assembly, cov, type, rgi from table_data
@@ -308,28 +312,114 @@ process table{
 
 def getFiles(tsvFile) {
   // Extracts Read Files from TSV
-  log.info "Read input file: " + tsvFile
+  log.info "Reading  input file: " + tsvFile
   log.info "------------------------------"
   Channel.fromPath(tsvFile)
       .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
       .splitCsv(sep:'\t', skip: 1)
       .map { row ->
-            //def id = row[0]
-            //def assembly = returnFile(row[1])
-            //def lr = returnFile(row[2])
             [id:row[0], assembly:returnFile(row[1]), lr:returnFile(row[2])]
-            }
-       .view()
+            }   
 }
 
 def returnFile(it) {
 // Return file if it exists
     if (workflow.profile in ['test', 'localtest'] ) {
-        inputFile = file("$workflow.projectDir/" + it)
+        inputFile = file("$workflow.projectDir/data/" + it)
     } else {
         inputFile = file(it)
     }
     if (!file(inputFile).exists()) exit 1, "Missing file in TSV file: ${inputFile}, see --help for more information"
     return inputFile
+}
+
+
+def helpMessage() {
+  // Display help message
+  // this.pipelineMessage()
+  log.info "  Usage:"
+  log.info "       nextflow run caspargross/hybridAssembly --input <file.csv> --mode <mode1,mode2...> [options] "
+  log.info "    --input <file.tsv>"
+  log.info "       TSV file containing paths to read files (id | shortread2| shortread2 | longread)"
+  log.info "    --mode {${validModes}}"
+  log.info "       Default: none, choose one or multiple modes to run the pipeline "
+  log.info " "
+  log.info "  Parameters: "
+  log.info "    --outDir "
+  log.info "    Output locattion (Default: current working directory"
+  log.info "    --genomeSize <bases> (Default: 5300000)"
+  log.info "    Expected genome size in bases."
+  log.info "    --targetShortReadCov <coverage> (Default: 60)"
+  log.info "    Short reads will be downsampled to a maximum of this coverage"
+  log.info "    --targetLongReadCov <coverage> (Default: 60)"
+  log.info "    Long reads will be downsampled to a maximum of this coverage"
+  log.info "    --cpu <threads>"
+  log.info "    set max number of threads per process"
+  log.info "    --mem <Gb>"
+  log.info "    set max amount of memory per process"
+  log.info "    --minContigLength <length>"
+  log.info "    filter final contigs for minimum length (Default: 1000)"
+  log.info "          "
+  log.info "  Options:"
+//  log.info "    --shortRead"
+//  log.info "      Uses only short reads. Only 'spades_simple', 'spades_plasmid' and 'unicycler' mode."
+//  log.info "    --longRead"
+//  log.info "      Uses long read only. Only 'unicycler', 'miniasm', 'canu' and 'flye'"
+//  log.info "    --fast"
+//  log.info "      Skips some steps to run faster. Only one cycle of error correction'" 
+  log.info "    --version"
+  log.info "      Displays pipeline version"
+  log.info "           "
+  log.info "  Profiles:"
+  log.info "    -profile local "
+  log.info "    Pipeline runs with locally installed conda environments (found in env/ folder)"
+  log.info "    -profile test "
+  log.info "    Runs complete pipeline on small included test dataset"
+  log.info "    -profile localtest "
+  log.info "    Runs test profile with locally installed conda environments"
+
+
+}
+
+
+
+def grabRevision() {
+  // Return the same string executed from github or not
+  return workflow.revision ?: workflow.commitId ?: workflow.scriptId.substring(0,10)
+}
+
+def minimalInformationMessage() {
+  // Minimal information message
+  log.info "Command Line  : " + workflow.commandLine
+  log.info "Profile       : " + workflow.profile
+  log.info "Project Dir   : " + workflow.projectDir
+  log.info "Launch Dir    : " + workflow.launchDir
+  log.info "Work Dir      : " + workflow.workDir
+  log.info "Cont Engine   : " + workflow.containerEngine
+  log.info "Out Dir       : " + params.outDir
+  log.info "Align. Overlp.: " + params.seqPadding
+  log.info "Cov. window   : " + params.covWindow
+  log.info "Max Plasm. Len: " + params.maxLength
+  log.info "Containers    : " + workflow.container 
+}
+
+def pipelineMessage() {
+  // Display hybridAssembly info  message
+  log.info "PlasmIdent Pipeline ~  version ${workflow.manifest.version} - revision " + this.grabRevision() + (workflow.commitId ? " [${workflow.commitId}]" : "")
+}
+
+def startMessage() {
+  // Display start message
+  // this.asciiArt()
+  this.pipelineMessage()
+  this.minimalInformationMessage()
+}
+
+workflow.onComplete {
+  // Display complete message
+  log.info "Completed at: " + workflow.complete
+  log.info "Duration    : " + workflow.duration
+  log.info "Success     : " + workflow.success
+  log.info "Exit status : " + workflow.exitStatus
 }
 
