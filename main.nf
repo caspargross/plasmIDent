@@ -62,6 +62,7 @@ process pad_plasmids {
 process combine_padded_contigs {
 // Recombines padded contigs into a single fasta
     tag{id + ":" + contigName}
+    publishDir "${params.outDir}/${id}/alignment/", mode: 'copy'
 
     input:
     set id, assembly, lr, contigName from contigs_padded.groupTuple()
@@ -103,7 +104,7 @@ process map_longreads {
 
     script:
     """
-    minimap2 -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
+    minimap2 -Y -P -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
     | samtools sort | samtools view -b -F 4 -o  ${id}_${type}_lr.bam 
     samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bai
     """
@@ -128,22 +129,24 @@ process find_ovlp_reads {
     """
     bedtools bamtobed -i ${bam} > reads.bed
     echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
-    echo -e ${contig_name}'\\t'\$(expr ${length} - ${params.seqPadding} - 10)'\\t'\$(expr ${length} - ${params.seqPadding} + 10) >> breaks.bed
-    bedtools intersect -wa  -a reads.bed -b breaks.bed > ovlp.bed
-    
-    awk '{print \$4}' ovlp.bed | uniq -D | uniq > readID.txt
+    echo -e ${contig_name}'\\t'\$(expr ${length} - 10)'\\t'\$(expr ${length} + 10) >> breaks.bed
+
+    intersectBed -wa -a reads.bed -b breaks.bed > ovlp.bed
+    awk '{print \$4}' ovlp.bed | sort | uniq -D | uniq > readID.txt
     samtools view -H ${bam} > ovlp.sam 
     samtools view ${bam} | grep -f readID.txt >> ovlp.sam || true
     samtools view -b ovlp.sam > ovlp.bam
     samtools index ovlp.bam
     
+    bedtools bamtobed -i ovlp.bam > ovlp_extracted.bed
+     
     source activate mosdepth
     mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${contig_name} ovlp.bam
     gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
     
-    03_prepare_bed.R ovlp.bed ${params.seqPadding} ovlp.txt  TRUE FALSE ${contig_name} ${length}
-    03_prepare_bed.R cov_ovlp.bed 0 cov_ovlp.txt FALSE TRUE
-    03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt FALSE FALSE ${contig_name} ${length}
+    03_prepare_bed.R ovlp_extracted.bed ${params.seqPadding} ovlp.txt FALSE ${contig_name} ${length}
+    03_prepare_bed.R cov_ovlp.bed 0 cov_ovlp.txt TRUE
+    03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt FALSE ${contig_name} ${length}
     """
 }
 
@@ -217,12 +220,12 @@ process format_data_cov {
     if (type == "padded")
         """
         gunzip -c ${bed} > cov.bed
-        03_prepare_bed.R cov.bed ${params.seqPadding} cov.txt FALSE TRUE
+        03_prepare_bed.R cov.bed ${params.seqPadding} cov.txt TRUE
         """
     else
         """
         gunzip -c ${bed} > cov.bed
-        03_prepare_bed.R cov.bed 0 cov.txt FALSE TRUE
+        03_prepare_bed.R cov.bed 0 cov.txt TRUE
         """
 }
 
