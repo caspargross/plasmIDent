@@ -168,6 +168,7 @@ dependencies:
   - r-snow=0.4_3=r351h6115d3f_1000
   - r-spatial=7.3_11=r351hc070d10_2
   - r-survival=2.42_6=r351hc070d10_1
+  - r-data.table=1.11.6=r351hc070d10_0
   - readline=7.0=haf1bffa_1
   - reportlab=3.5.8=py35h77bcf2c_0
   - seaborn=0.9.0=py_0
