@@ -6,6 +6,17 @@ channels:
   - defaults
 dependencies:
   - bedtools=2.27.1=he941832_2
+  - bioconductor-biocgenerics=0.26.0=r351_0
+  - bioconductor-biocparallel=1.14.2=r351h26a2512_0
+  - bioconductor-biostrings=2.48.0=r351h470a237_0
+  - bioconductor-genomeinfodb=1.16.0=r351_0
+  - bioconductor-genomeinfodbdata=1.1.0=r351_0
+  - bioconductor-genomicranges=1.32.7=r351h470a237_0
+  - bioconductor-iranges=2.14.12=r351h470a237_0
+  - bioconductor-rsamtools=1.32.3=r351hfc679d8_0
+  - bioconductor-s4vectors=0.18.3=r351h470a237_0
+  - bioconductor-xvector=0.20.0=r351h470a237_0
+  - bioconductor-zlibbioc=1.26.0=r351h470a237_0
   - biopython=1.68=py35_0
   - blast=2.6.0=boost1.64_2
   - circos=0.69.6=3
@@ -129,6 +140,7 @@ dependencies:
   - pytz=2018.7=py_0
   - qt=5.6.2=hf70d934_9
   - r=3.5.1=r351_0
+  - r-ade4=1.7_13=r351hc070d10_0
   - r-base=3.5.1=h391c2eb_5
   - r-bh=1.66.0_1=r351_2001
   - r-bitops=1.0_6=r351hc070d10_2
@@ -151,6 +163,8 @@ dependencies:
   - r-rcurl=1.95_4.11=r351hc070d10_3
   - r-recommended=3.5.1=r351_1
   - r-rpart=4.1_13=r351hc070d10_2
+  - r-segmented=0.5_3.0=r351h6115d3f_1000
+  - r-seqinr=3.4_5=r351h470a237_2
   - r-snow=0.4_3=r351h6115d3f_1000
   - r-spatial=7.3_11=r351hc070d10_2
   - r-survival=2.42_6=r351hc070d10_1
