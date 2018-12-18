@@ -9,8 +9,9 @@
 * 
 **/
 
-
+startMessage()
 samples = getFiles(params.input)
+env = 'source activate PI_env'
 
 // Duplicate channel
 samples.into{samples_rgi; samples_gc; samples_split; samples_map; samples_table}
@@ -95,7 +96,6 @@ process map_longreads {
 // Use minimap2 to align longreads to padded contigs
     publishDir "${params.outDir}/${id}/alignment/", mode: 'copy'
     tag{id}
-    conda 'PI_env'
 
     input:
     set id, assembly, lr, type from to_mapping
@@ -105,6 +105,7 @@ process map_longreads {
 
     script:
     """
+    ${env}
     minimap2 -Y -P -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
     | samtools sort | samtools view -b -F 4 -o  ${id}_${type}_lr.bam 
     samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bai
@@ -119,7 +120,6 @@ bam_lr.into{bam_cov; bam_ovlp}
 process find_ovlp_reads {
 // Creates circos file from bam, uses R script to find overlapping reads
     tag{id + ":" + contig_name}
-    conda 'PI_env'
 
     input:
     set id, lr, contig_name, length, seq, file(assembly), type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
@@ -129,6 +129,7 @@ process find_ovlp_reads {
 
     script:
     """
+    ${env}
     bedtools bamtobed -i ${bam} > reads.bed
     echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
     echo -e ${contig_name}'\\t'\$(expr ${length} - 10)'\\t'\$(expr ${length} + 10) >> breaks.bed
@@ -142,7 +143,6 @@ process find_ovlp_reads {
     
     bedtools bamtobed -i ovlp.bam > ovlp_extracted.bed
      
-    source activate mosdepth
     mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${contig_name} ovlp.bam
     gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
     
@@ -156,7 +156,6 @@ process identify_resistance_genes {
 // Find antibiotic resistance genes in the CARD database
     publishDir "${params.outDir}/${id}/resistances", mode: 'copy'
     tag{id}
-    conda 'PI_env'
 
     input:
     set id, assembly, lr from samples_rgi
@@ -166,7 +165,7 @@ process identify_resistance_genes {
 
     script:
     """
-    source activate rgi
+    ${env}
     rgi main -i ${assembly} -n ${params.cpu} -o ${id}_rgi
     """
 }
@@ -185,6 +184,7 @@ process format_data_rgi {
 
     script:
     """
+    ${env}
     02_create_rgi_circos.R ${rgi}
     """
 }
@@ -193,7 +193,6 @@ process mos_depth {
 // Calculate coverage depth
     publishDir "${params.outDir}/${id}/coverage", mode: 'copy'
     tag{id}
-    conda 'PI_env'
 
     input:
     set id, assembly, type, aln_lr, aln_lr_idx from bam_cov
@@ -204,6 +203,7 @@ process mos_depth {
 
     script:
     """
+    ${env}
     samtools index ${aln_lr}
     mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${id} ${aln_lr} 
     mv ${id}.regions.bed.gz ${id}_cov_${type}.bed.gz
@@ -223,11 +223,13 @@ process format_data_cov {
     script:
     if (type == "padded")
         """
+        ${env}
         gunzip -c ${bed} > cov.bed
         03_prepare_bed.R cov.bed ${params.seqPadding} cov.txt TRUE
         """
     else
         """
+        ${env}
         gunzip -c ${bed} > cov.bed
         03_prepare_bed.R cov.bed 0 cov.txt TRUE
         """
@@ -252,6 +254,7 @@ process calcGC {
 
     script:
     """
+    ${env}
     01_calculate_GC.R ${assembly} 
     """
 }
@@ -275,7 +278,6 @@ process circos{
 // Use the combined data to create circular plots
     publishDir "${params.outDir}/${id}/plots", mode: 'copy'
     tag{id + ":" + contigID}
-    conda 'PI_env'
 
     input:
     set id, contigID, length, file(reads), file(ovlp), file(cov_ovlp), file(gc50), file(gc1000), file(cov), type, file(rgi), file(rgi_span) from combined_data
@@ -285,6 +287,7 @@ process circos{
 
     script:
     """
+    ${env}
     echo "chr	-	${contigID}	1	0	${length}	chr1	color=lblue" > contig.txt
     ln -s ${workflow.projectDir}/conf/circos//* .
     circos
@@ -306,6 +309,7 @@ process table{
 
     script:
     """
+    ${env}
     04_summary_table.R ${assembly} ${rgi} ${cov} ${gc}
     mv contig_summary.txt ${id}_summary.csv
     """
