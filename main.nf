@@ -14,7 +14,7 @@ samples = getFiles(params.input)
 env = 'source activate PI_env'
 
 // Duplicate channel
-samples.into{samples_rgi; samples_gc; samples_split; samples_map; samples_table}
+samples.into{samples_rgi; samples_split; samples_map; samples_table}
 
 // Split into contigs and filter for length channel
 samples_split
@@ -69,13 +69,15 @@ process combine_padded_contigs {
     set id, assembly, lr, contigName from contigs_padded.groupTuple()
 
     output:
-    set id, file("${id}_padded.fasta"), lr, val("padded") into map_padded
+    set id, file("${id}_padded.fasta"), lr, val("padded") into assembly_padded
 
     script:
     """
     cat \$(echo ${assembly} | tr -d '[],') > ${id}_padded.fasta 
     """
 }
+
+assembly_padded.into{map_padded; gc_padded}
 
 // Mix channel with padded and normal contigs
 samples_map
@@ -101,14 +103,14 @@ process map_longreads {
     set id, assembly, lr, type from to_mapping
 
     output:
-    set id, assembly, type, file("${id}_${type}_lr.bam"), file("${id}_${type}_lr.bai") into bam_lr
+    set id, assembly, type, file("${id}_${type}_lr.bam"), file("${id}_${type}_lr.bam.bai") into bam_lr
 
     script:
     """
     ${env}
     minimap2 -Y -P -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
     | samtools sort | samtools view -b -F 4 -o  ${id}_${type}_lr.bam 
-    samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bai
+    samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bam.bai
     """
 }
 
@@ -143,7 +145,7 @@ process find_ovlp_reads {
     
     bedtools bamtobed -i ovlp.bam > ovlp_extracted.bed
      
-    mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${contig_name} ovlp.bam
+    mosdepth -t ${params.cpu} -F 4 -n -b ${params.covWindow} ${contig_name} ovlp.bam
     gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
     
     03_prepare_bed.R ovlp_extracted.bed ${params.seqPadding} ovlp.txt FALSE ${contig_name} ${length}
@@ -195,7 +197,7 @@ process mos_depth {
     tag{id}
 
     input:
-    set id, assembly, type, aln_lr, aln_lr_idx from bam_cov
+    set id, assembly, type, file(aln_lr), file(aln_lr_idx) from bam_cov
 
     output:
     file("${id}_cov_${type}.bed.gz")
@@ -204,8 +206,7 @@ process mos_depth {
     script:
     """
     ${env}
-    samtools index ${aln_lr}
-    mosdepth -t ${params.cpu} -n -b ${params.covWindow} ${id} ${aln_lr} 
+    mosdepth -t ${params.cpu} -F 4  -n -b ${params.covWindow} ${id} ${aln_lr} 
     mv ${id}.regions.bed.gz ${id}_cov_${type}.bed.gz
     """
 }
@@ -246,7 +247,7 @@ process calcGC {
     tag{id}
 
     input:
-    set id, assembly, lr from samples_gc
+    set id, assembly, lr from gc_padded
     
     output:
     set id, file('gc1000.txt'), assembly into table_data_gc
@@ -255,7 +256,7 @@ process calcGC {
     script:
     """
     ${env}
-    01_calculate_GC.R ${assembly} 
+    01_calculate_GC.R ${assembly} ${params.seqPadding}
     """
 }
 
@@ -350,35 +351,20 @@ def helpMessage() {
   // Display help message
   // this.pipelineMessage()
   log.info "  Usage:"
-  log.info "       nextflow run caspargross/hybridAssembly --input <file.csv> --mode <mode1,mode2...> [options] "
+  log.info "       nextflow run caspargross/plasmident --input <file.csv> --mode <mode1,mode2...> [options] "
   log.info "    --input <file.tsv>"
-  log.info "       TSV file containing paths to read files (id | shortread2| shortread2 | longread)"
-  log.info "    --mode {${validModes}}"
-  log.info "       Default: none, choose one or multiple modes to run the pipeline "
-  log.info " "
+  log.info "       TSV file containing paths to files (id | assembly | longread)"
   log.info "  Parameters: "
   log.info "    --outDir "
   log.info "    Output locattion (Default: current working directory"
-  log.info "    --genomeSize <bases> (Default: 5300000)"
-  log.info "    Expected genome size in bases."
-  log.info "    --targetShortReadCov <coverage> (Default: 60)"
-  log.info "    Short reads will be downsampled to a maximum of this coverage"
-  log.info "    --targetLongReadCov <coverage> (Default: 60)"
-  log.info "    Long reads will be downsampled to a maximum of this coverage"
+  log.info "    --maxLength <bases> (Default: 500000)"
+  log.info "    Contigs larger then maxLength will not be considered a putative plasmid"
+  log.info "    --seqPadding <bases> (Default: 2000)"
+  log.info "    Length of recycled sequences at contig edges for long read mapping."
+  log.info "    --covWindow <coverage> (Default: 50)"
+  log.info "    Moving window size for coverage calculation"
   log.info "    --cpu <threads>"
   log.info "    set max number of threads per process"
-  log.info "    --mem <Gb>"
-  log.info "    set max amount of memory per process"
-  log.info "    --minContigLength <length>"
-  log.info "    filter final contigs for minimum length (Default: 1000)"
-  log.info "          "
-  log.info "  Options:"
-//  log.info "    --shortRead"
-//  log.info "      Uses only short reads. Only 'spades_simple', 'spades_plasmid' and 'unicycler' mode."
-//  log.info "    --longRead"
-//  log.info "      Uses long read only. Only 'unicycler', 'miniasm', 'canu' and 'flye'"
-//  log.info "    --fast"
-//  log.info "      Skips some steps to run faster. Only one cycle of error correction'" 
   log.info "    --version"
   log.info "      Displays pipeline version"
   log.info "           "
