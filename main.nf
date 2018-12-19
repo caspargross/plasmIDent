@@ -14,7 +14,7 @@ samples = getFiles(params.input)
 env = 'source activate PI_env'
 
 // Duplicate channel
-samples.into{samples_rgi; samples_split; samples_map; samples_table}
+samples.into{samples_rgi; samples_glimmer; samples_split; samples_map; samples_table}
 
 // Split into contigs and filter for length channel
 samples_split
@@ -247,11 +247,11 @@ process calcGC {
     tag{id}
 
     input:
-    set id, assembly, lr from gc_padded
+    set id, assembly, lr, type from gc_padded
     
     output:
     set id, file('gc1000.txt'), assembly into table_data_gc
-    set id, file('gc50.txt'), file('gc1000.txt') into circos_data_gc
+    set id, file('gc50.txt'), file('gc1000.txt'), file('gcskew50.txt'), file('gcskew1000.txt'), file('gcskewsum50.txt'), file('gcskewsum1000.txt') into circos_data_gc
 
     script:
     """
@@ -260,11 +260,51 @@ process calcGC {
     """
 }
 
+process glimmer {
+// Predict gene positions with glimmer3
+    publishDir "${params.outDir}/${id}/genes", mode: 'copy'
+    tag{id}
+
+    input:
+    set id, assembly, lr from samples_glimmer
+
+    output:
+    set id, file("${id}.predict") into genes_glimmer
+    file("${id}.detail")
+
+    script:
+    """
+    ${env}
+    long-orfs -n -t 1.15 ${assembly} ${id}.longorfs
+    extract -t ${assembly} ${id}.longorfs > ${id}.train
+    build-icm -r ${id}.icm < ${id}.train
+    glimmer3 -o50 -g110 -t30 ${assembly} ${id}.icm ${id}
+    """
+}
+
+process format_glimmer {
+// Format predicted glimmer genes for circos
+    tag{id}
+
+    input:
+    set id, genes from genes_glimmer
+
+    output: 
+    set id, file("genes.txt") into circos_data_genes
+
+    script:
+    """
+    ${env}
+    05_convert_glimmer.R ${genes}
+    """
+}
+
 // Combine all finished circos data based on the id
 circos_data_gc
    .join(circos_data_cov)
        .join(circos_data_rgi)
-       .set{circos_data}
+           .join(circos_data_genes)
+           .set{circos_data}
 
 // Combine contig data with sample wide circos data
 combined_data = circos_reads.combine(circos_data, by: 0)
@@ -281,7 +321,7 @@ process circos{
     tag{id + ":" + contigID}
 
     input:
-    set id, contigID, length, file(reads), file(ovlp), file(cov_ovlp), file(gc50), file(gc1000), file(cov), type, file(rgi), file(rgi_span) from combined_data
+    set id, contigID, length, file(reads), file(ovlp), file(cov_ovlp), file(gc50), file(gc1000), file(gcskew50), file(gcskew1000), file(gcskewsum50), file(gcskewsum1000), file(cov), type, file(rgi), file(rgi_span), file(genes) from combined_data
 
     output:
     file("${id}_${contigID}_plasmid.*")
@@ -311,7 +351,7 @@ process table{
     script:
     """
     ${env}
-    04_summary_table.R ${assembly} ${rgi} ${cov} ${gc}
+    04_summary_table.R ${assembly} ${rgi} ${cov} ${gc} ${params.seqPadding}
     mv contig_summary.txt ${id}_summary.csv
     """
 }
