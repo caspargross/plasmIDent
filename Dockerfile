@@ -9,6 +9,8 @@ MAINTAINER Caspar Gross <mail@caspar.one>
 LABEL description="contains all the dependencies for plasmid Identification pipeline at github.com/caspargross/plasmidIdentification" 
 
 SHELL ["/bin/bash", "-c"]
+# Install procps
+RUN apt-get update && apt-get install -y procps
 
 # Install conda envs
 ADD env/PI_env.yml /tmp/PI_env.yml
