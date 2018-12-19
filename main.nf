@@ -135,11 +135,11 @@ process find_ovlp_reads {
     bedtools bamtobed -i ${bam} > reads.bed
     echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
     echo -e ${contig_name}'\\t'\$(expr ${length} - 10)'\\t'\$(expr ${length} + 10) >> breaks.bed
-
+    samtools view -L breaks.bed -b ${bam} > region.bam
     intersectBed -wa -a reads.bed -b breaks.bed > ovlp.bed
     awk '{print \$4}' ovlp.bed | sort | uniq -D | uniq > readID.txt
-    samtools view -H ${bam} > ovlp.sam 
-    samtools view ${bam} | grep -f readID.txt >> ovlp.sam || true
+    samtools view -H region.bam > ovlp.sam 
+    samtools view region.bam | grep -f readID.txt >> ovlp.sam || true
     samtools view -b ovlp.sam > ovlp.bam
     samtools index ovlp.bam
     
