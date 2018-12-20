@@ -27,7 +27,7 @@ samples_split
     .map{
         def id = it[0]
         def lr = it[2]
-        def contigName = it[1]['id']
+        def contigName = it[1]['id'].replaceAll('_', '-')
         def length = it[1]['seqString'].length()
         def sequence = it[1]['seqString']
         [id, lr, contigName, length, sequence]
@@ -376,13 +376,14 @@ def getFiles(tsvFile) {
 }
 
 def returnFile(it) {
-// Return file if it exists
+// Return file if it exists and is readable
     if (workflow.profile in ['test', 'localtest'] ) {
         inputFile = file("$workflow.projectDir/data/" + it)
     } else {
         inputFile = file(it)
     }
     if (!file(inputFile).exists()) exit 1, "Missing file in TSV file: ${inputFile}, see --help for more information"
+    if (!file(inputFile).canRead()) exit 1, "Cannot read file in TSV file: ${inputFile}"
     return inputFile
 }
 
