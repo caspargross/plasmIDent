@@ -62,4 +62,4 @@ nextflow run plasmident --input read_locations.tsv
 Results
 -------
 
-![FlowChart](https://github.com/caspargross/plsamident/example_output.png)
+![FlowChart](https://github.com/caspargross/plasmident/example_output.png)
