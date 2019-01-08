@@ -12,6 +12,7 @@
 startMessage()
 samples = getFiles(params.input)
 env = 'source activate PI_env'
+runParamCheck()
 
 // Duplicate channel
 samples.into{samples_rgi; samples_glimmer; samples_split; samples_map; samples_table}
@@ -27,12 +28,14 @@ samples_split
     .map{
         def id = it[0]
         def lr = it[2]
-        def contigName = it[1]['id'].replaceAll('_', '-')
+        //def contigName = it[1]['id'].replaceAll('_', '-')
+        def contigName = it[1]['id']
         def length = it[1]['seqString'].length()
         def sequence = it[1]['seqString']
         [id, lr, contigName, length, sequence]
        }
     .filter{it[3] < params.maxLength}
+    .filter{it[3] > params.minLength}
   //.view()
     .into{contigs; contigs_2}
 
@@ -362,6 +365,11 @@ process table{
 =                               F U N C T I O N S                              =
 ================================================================================
 */
+def runParamCheck() {
+  if (params.minLength > params.seqPadding) {
+	log.info "Minimum contig length cannot be shorter then seqPadding. Please adjust parameters and restart"
+  }
+}
 
 def getFiles(tsvFile) {
   // Extracts Read Files from TSV

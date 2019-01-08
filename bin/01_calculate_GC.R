@@ -91,6 +91,7 @@ for (i in 1:length(fasta)) {
   
   len <- length(getSequence(fasta[[i]])) - 2*padding
   
+  print(paste("GC vectors calculated, len: ", len)) 
   # Write values to file
   gc1000 <- aggregateCircos(GC1000[[1]], 500, getName(fasta[[i]]), len)
   gcskew1000 <- aggregateCircos(GC1000[[2]], 500, getName(fasta[[i]]), len)
@@ -103,7 +104,8 @@ for (i in 1:length(fasta)) {
   # Shift values for padded fasta
   #print(vals1000)
   #print(vals50)
-  
+  print("Values aggregating, writing to file now ")
+
   lapply(gc50, write, "gc50.txt", append=TRUE)
   lapply(gc1000, write, "gc1000.txt", append=TRUE)
   lapply(gcskew50, write, "gcskew50.txt", append=TRUE)

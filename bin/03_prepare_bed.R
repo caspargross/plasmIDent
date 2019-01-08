@@ -24,7 +24,6 @@ dt <- fread(bed)
 
 # Write dummy file if bed is empty
 if (nrow(dt) < 1) { 
-  open(outFile)
   writeLines(c("0", "0", "0", "0"), sep="\t", outFile)
   close(outFile)
  
