@@ -92,9 +92,9 @@ samples_map
     .mix(map_padded
         .map{[it[0], 
             it[1], 
-            it[2][1],
+            it[2][0],
             it[3]]})
-  //.view()
+    .view()
     .set{to_mapping}
 
 process map_longreads {
