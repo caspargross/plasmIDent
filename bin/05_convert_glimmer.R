@@ -20,7 +20,7 @@ outFile <- file("genes.txt", "w")
 for (line in lines) {
   if (startsWith(line, ">")) {
     contigID <- unlist(str_split(line, ">"))[2]
-    contigID <- str_replace(contigID, '_', '-')
+    #contigID <- str_replace(contigID, '_', '-')
     contigID <- str_split(contigID, ' ')[[1]][1]
   } else {
     line <- str_squish(line)
