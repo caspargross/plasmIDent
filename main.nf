@@ -152,7 +152,7 @@ process find_ovlp_reads {
     gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
     
     03_prepare_bed.R ovlp_extracted.bed ${params.seqPadding} ovlp.txt FALSE ${contig_name} ${length}
-    03_prepare_bed.R cov_ovlp.bed 0 cov_ovlp.txt TRUE
+    03_prepare_bed.R cov_ovlp.bed ${params.seqPadding} cov_ovlp.txt TRUE
     03_prepare_bed.R reads.bed ${params.seqPadding} reads.txt FALSE ${contig_name} ${length}
     """
 }
