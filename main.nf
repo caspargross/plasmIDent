@@ -15,14 +15,34 @@ env = 'source activate PI_env'
 runParamCheck()
 
 // Duplicate channel
-samples.into{samples_rgi; samples_glimmer; samples_split; samples_map; samples_table}
+samples.into{samples_rgi; samples_glimmer; samples_filter}
+
+process filter_reads {
+// Subsample large datasets to given target coverage
+// Filtering focusses on high reads to keep shorter plasmid reads
+    tag{id}
+
+    input:
+    set id, assembly, lr from samples_filter 
+
+    output:
+    set id, assembly, file('reads_filtered.fastq') into samples_map, samples_split
+
+    script:
+    """
+    ${env}
+    len=\$(grep -v '>' ${assembly} | wc -c)
+    nbases=\$(expr \$len * ${params.targetCov})
+    filtlong -t \$nbases --mean_q_weight 2 --window_q_weight 2 ${lr} > reads_filtered.fastq
+    """
+}
 
 // Split into contigs and filter for length channel
 samples_split
     .map{[
-        it['id'],
-        file(it.get('assembly')),
-        it['lr']
+        it[0],
+        it[1],
+        it[2]
         ]}
     .splitFasta(record: [id: true, seqString: true])
     .map{
@@ -37,8 +57,26 @@ samples_split
     .filter{it[3] < params.maxLength}
     .filter{it[3] > params.minLength}
   //.view()
-    .into{contigs; contigs_2}
+    .into{contigs; contigs_2; contigs_3}
 
+process save_plasmids {
+// Save plasmids as a separate fasta file
+    tag{id + ":" + contigName} 
+    publishDir "${params.outDir}/${id}/plasmids/", mode: 'copy'
+
+    input:
+    set id, lr, contigName, length, sequence from contigs_3
+   
+    output:
+    file("${id}_${contigName}.fasta")
+
+    script:
+    """
+    echo ">${contigName} len=${length}" > ${id}_${contigName}.fasta
+    echo ${sequence} >> ${id}_${contigName}.fasta
+
+    """
+}
 
 process pad_plasmids {
 // Add prefix and suffix with sequence from oppsig end to each plasmid
@@ -82,12 +120,13 @@ process combine_padded_contigs {
 
 assembly_padded.into{map_padded; gc_padded}
 
+
 // Mix channel with padded and normal contigs
 samples_map
   //.view()
-    .map{[it['id'], 
-        it['assembly'], 
-        it['lr'], 
+    .map{[it[0], 
+        it[1], 
+        it[2], 
         'normal']}
     .mix(map_padded
         .map{[it[0], 
@@ -410,8 +449,10 @@ def helpMessage() {
   log.info "    Contigs larger then maxLength will not be considered a putative plasmid"
   log.info "    --seqPadding <bases> (Default: 2000)"
   log.info "    Length of recycled sequences at contig edges for long read mapping."
-  log.info "    --covWindow <coverage> (Default: 50)"
+  log.info "    --covWindow <bases> (Default: 50)"
   log.info "    Moving window size for coverage calculation"
+  log.info "    --targetCov <coverage> (Default: 50)"
+  log.info "    Target coverage for long read sampling"
   log.info "    --cpu <threads>"
   log.info "    set max number of threads per process"
   log.info "    --version"
