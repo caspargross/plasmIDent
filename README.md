@@ -1,6 +1,8 @@
 PlasmIdent
 ==========
 
+[![Build Status](https://travis-ci.org/caspargross/PlasmIdent.svg?branch=master)](https://travis-ci.org/caspargross/PlasmIdent)
+
 Identification of circular plasmid in bacterial genome assemblies using long reads.
 
 - Gene prediction (Glimmer3)
