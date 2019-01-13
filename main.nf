@@ -447,6 +447,7 @@ def minimalInformationMessage() {
   log.info "Align. Overlp.: " + params.seqPadding
   log.info "Cov. window   : " + params.covWindow
   log.info "Max Plasm. Len: " + params.maxLength
+  log.info "Target cov.   : " + params.targetCov
   log.info "Containers    : " + workflow.container 
 }
 

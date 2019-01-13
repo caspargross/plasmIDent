@@ -21,6 +21,7 @@ dependencies:
   - blast=2.6.0=boost1.64_2
   - circos=0.69.6=3
   - diamond=0.8.36=hd28b015_2
+  - filtlong=0.2.0=he941832_2
   - glimmer=3.02=3
   - htslib=1.9=hc238db4_4
   - libdeflate=1.0=h470a237_0
@@ -119,7 +120,7 @@ dependencies:
   - msgpack-python=0.5.6=py35h2d50403_3
   - ncurses=6.1=hfc679d8_2
   - olefile=0.46=py_0
-  - openssl=1.0.2p=h470a237_1
+  - openssl=1.0.2p=h470a237_2
   - pandas=0.23.4=py35hf8a1672_0
   - pango=1.40.14=he752989_2
   - pathlib2=2.3.2=py35_0
