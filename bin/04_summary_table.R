@@ -45,6 +45,8 @@ dt <- data.table(id = getName(seq),
                  cov = val_cov,
                  gc = val_gc)
 
+dt[,cov := round(cov, 2),]
+dt[,gc := round(gc, 2),]
 dt[,contig := getID(id, 0),]
 
 dt <- merge(dt, dt_ar, by.x = 'contig', by.y = 'Contig', all.x = T)

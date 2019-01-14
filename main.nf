@@ -19,7 +19,7 @@ samples.into{samples_rgi; samples_glimmer; samples_filter}
 
 process filter_reads {
 // Subsample large datasets to given target coverage
-// Filtering focusses on high reads to keep shorter plasmid reads
+// Filtering with focus on high qual to keep enough short reads for plasmids
     tag{id}
 
     input:
@@ -133,7 +133,6 @@ samples_map
             it[1], 
             it[2][0],
             it[3]]})
-    .view()
     .set{to_mapping}
 
 process map_longreads {
