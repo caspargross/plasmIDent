@@ -33,7 +33,7 @@ process filter_reads {
     ${env}
     len=\$(grep -v '>' ${assembly} | wc -c)
     nbases=\$(expr \$len * ${params.targetCov})
-    filtlong -t \$nbases --mean_q_weight 2 --window_q_weight 2 ${lr} > reads_filtered.fastq
+    filtlong -t \$nbases --length_weight 0 ${lr} > reads_filtered.fastq
     """
 }
 
@@ -68,12 +68,12 @@ process save_plasmids {
     set id, lr, contigName, length, sequence from contigs_3
    
     output:
-    file("${id}_${contigName}.fasta")
+    file("${contigName}.fasta")
 
     script:
     """
-    echo ">${contigName} len=${length}" > ${id}_${contigName}.fasta
-    echo ${sequence} >> ${id}_${contigName}.fasta
+    echo ">${contigName} len=${length}" > ${contigName}.fasta
+    echo ${sequence} >> ${contigName}.fasta
 
     """
 }
@@ -273,7 +273,7 @@ process format_data_cov {
         """
         ${env}
         gunzip -c ${bed} > cov.bed
-        03_prepare_bed.R cov.bed 0 cov.txt TRUE
+        03_prepare_bed.R cov.bed 0 cov.txt FALSE 
         """
 }
 
