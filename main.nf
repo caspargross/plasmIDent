@@ -429,7 +429,7 @@ def getFiles(tsvFile) {
 def returnFile(it) {
 // Return file if it exists and is readable
   if (workflow.profile in ['test', 'localtest'] ) {
-      return(file("$workflow.projectDir/data" + it))
+      return(file("$workflow.projectDir/data/" + it))
   }
   if (!file(it).exists()) exit 1, "Missing file in TSV file: ${it}, see --help for more information"
   if (!file(it).canRead()) exit 1, "Cannot read file in TSV file: ${it}"
