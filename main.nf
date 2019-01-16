@@ -416,8 +416,8 @@ def getFiles(tsvFile) {
   } else {
       inputFile = file(tsvFile)
   }
-  log.info "Reading  input file: " + inputFile
   log.info "------------------------------"
+  log.info "Reading  input file: " + inputFile
   Channel.fromPath(inputFile)
       .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
       .splitCsv(sep:'\t', skip: 1)
@@ -428,9 +428,9 @@ def getFiles(tsvFile) {
 
 def returnFile(it) {
 // Return file if it exists and is readable
-    if (!file(inputFile).exists()) exit 1, "Missing file in TSV file: ${inputFile}, see --help for more information"
-    if (!file(inputFile).canRead()) exit 1, "Cannot read file in TSV file: ${inputFile}"
-    return inputFile
+    if (!file(it).exists()) exit 1, "Missing file in TSV file: ${it}, see --help for more information"
+    if (!file(it).canRead()) exit 1, "Cannot read file in TSV file: ${it}"
+    return file(it)
 }
 
 
@@ -487,6 +487,7 @@ def minimalInformationMessage() {
   log.info "Align. Overlp.: " + params.seqPadding
   log.info "Cov. window   : " + params.covWindow
   log.info "Max Plasm. Len: " + params.maxLength
+  log.info "Min Plasm. Len: " + params.minLength
   log.info "Target cov.   : " + params.targetCov
   log.info "Containers    : " + workflow.container 
 }

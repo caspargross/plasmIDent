@@ -1,6 +1,6 @@
 If you dont want or cant install the docker image, there are two other options to install the required dependencies to run the PlasmIdent pipeline.
 
-#Singularity Container
+# Singularity Container
 
 You need a current version (>3.0) of [Singularity](https://www.sylabs.io/singularity/) to download docker images
 
@@ -11,7 +11,7 @@ nextflow run PlasmIdent/ --input my_input.tsv -profile singularity
 ```
 
 
-#Conda environment
+# Conda environment
 
 The conda environment containing all the dependencies for this pipeline can be installed with the config file `env/PI_env.yml`
 
