@@ -93,4 +93,4 @@ There are other [run profiles](doc/profiles) for specific environments.
 Results
 -------
 
-![FlowChart](https://github.com/caspargross/plasmident/doc/example_output.png)
+![Example_Output](doc/example_output.png)
