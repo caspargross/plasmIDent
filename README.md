@@ -62,7 +62,7 @@ Alternative dependency installations:
 Run Application
 ---------------
 
-The pipeline requires an input file with a sample id (string) and paths for the assembly file in .fasta format and long reads in `.fastq` or `.fastq.gz`. The paths can be either relative to the input file location or absolute. In normal configuration (with docker), it is not possible to follow symbolic links. 
+The pipeline requires an input file with a sample id (string) and paths for the assembly file in .fasta format and long reads in `.fastq` or `.fastq.gz`. The paths can either be absolute or relative to the launch directory. In normal configuration (with docker), it is not possible to follow symbolic links. 
 
 The file must be tab-separated and have the following format
 
