@@ -411,9 +411,14 @@ def runParamCheck() {
 
 def getFiles(tsvFile) {
   // Extracts Read Files from TSV
-  log.info "Reading  input file: " + tsvFile
+  if (workflow.profile in ['test', 'localtest'] ) {
+      inputFile = file("$workflow.projectDir/" + tsvFile)
+  } else {
+      inputFile = file(tsvFile)
+  }
+  log.info "Reading  input file: " + inputFile
   log.info "------------------------------"
-  Channel.fromPath(tsvFile)
+  Channel.fromPath(inputFile)
       .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
       .splitCsv(sep:'\t', skip: 1)
       .map { row ->
@@ -423,11 +428,6 @@ def getFiles(tsvFile) {
 
 def returnFile(it) {
 // Return file if it exists and is readable
-    if (workflow.profile in ['test', 'localtest'] ) {
-        inputFile = file("$workflow.projectDir/data/" + it)
-    } else {
-        inputFile = file(it)
-    }
     if (!file(inputFile).exists()) exit 1, "Missing file in TSV file: ${inputFile}, see --help for more information"
     if (!file(inputFile).canRead()) exit 1, "Cannot read file in TSV file: ${inputFile}"
     return inputFile
