@@ -174,8 +174,8 @@ process find_ovlp_reads {
     """
     ${env}
     bedtools bamtobed -i ${bam} > reads.bed
-    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
-    echo -e ${contig_name}'\\t'\$(expr ${length} - 10)'\\t'\$(expr ${length} + 10) >> breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 1) > breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${length} + ${params.seqPadding} )'\\t'\$(expr ${length} + ${params.seqPadding} + 1) >> breaks.bed
     samtools view -L breaks.bed -b ${bam} > region.bam
     intersectBed -wa -a reads.bed -b breaks.bed > ovlp.bed
     awk '{print \$4}' ovlp.bed | sort | uniq -D | uniq > readID.txt
