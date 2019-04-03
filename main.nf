@@ -9,9 +9,10 @@
 * 
 **/
 
-startMessage()
+// Setup
 samples = getFiles(params.input)
 env = 'source activate PI_env'
+startMessage()
 runParamCheck()
 
 // Duplicate channel
@@ -29,12 +30,17 @@ process filter_reads {
     set id, assembly, file('reads_filtered.fastq') into samples_map, samples_split
 
     script:
-    """
-    ${env}
-    len=\$(grep -v '>' ${assembly} | wc -c)
-    nbases=\$(expr \$len * ${params.targetCov})
-    filtlong -t \$nbases --length_weight 0 ${lr} > reads_filtered.fastq
-    """
+    if (params.noSubsampling)
+        """
+        zcat -f ${lr} > reads_filtered.fastq
+        """
+    else
+        """
+        ${env}
+        len=\$(grep -v '>' ${assembly} | wc -c)
+        nbases=\$(expr \$len * ${params.targetCov})
+        filtlong -t \$nbases --length_weight 0 ${lr} > reads_filtered.fastq
+        """
 }
 
 // Split into contigs and filter for length channel
@@ -420,7 +426,7 @@ def getFiles(tsvFile) {
   log.info "Reading  input file: " + inputFile
   Channel.fromPath(inputFile)
       .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
-      .splitCsv(sep:'\t', skip: 1)
+      .splitCsv(sep:'\t')
       .map { row ->
             [id:row[0], assembly:returnFile(row[1]), lr:returnFile(row[2])]
             }   
@@ -455,6 +461,8 @@ def helpMessage() {
   log.info "    Moving window size for coverage calculation"
   log.info "    --targetCov <coverage> (Default: 50)"
   log.info "    Target coverage for long read sampling"
+  log.info "    --noSubsampling"
+  log.info "    Skips the read subsampling step. Use when read coverage is not uniform."
   log.info "    --cpu <threads>"
   log.info "    set max number of threads per process"
   log.info "    --version"
@@ -492,6 +500,7 @@ def minimalInformationMessage() {
   log.info "Max Plasm. Len: " + params.maxLength
   log.info "Min Plasm. Len: " + params.minLength
   log.info "Target cov.   : " + params.targetCov
+  log.info "read sampling : " + !params.noSubsampling
   log.info "Containers    : " + workflow.container 
 }
 
@@ -502,7 +511,7 @@ def pipelineMessage() {
 
 def startMessage() {
   // Display start message
-  // this.asciiArt()
+  this.asciiArt()
   this.pipelineMessage()
   this.minimalInformationMessage()
 }
@@ -513,5 +522,16 @@ workflow.onComplete {
   log.info "Duration    : " + workflow.duration
   log.info "Success     : " + workflow.success
   log.info "Exit status : " + workflow.exitStatus
+}
+
+def asciiArt() {
+    log.info "       _                    ___________           _   "
+    log.info "      | |                  |_   _|  _  \\         | |  "
+    log.info " _ __ | | __ _ ___ _ __ ___  | | | | | |___ _ __ | |_ "
+    log.info "| '_ \\| |/ _` / __| '_ ` _ \\ | | | | | / _ \\ '_ \\| __|"
+    log.info "| |_) | | (_| \\__ \\ | | | | || |_| |/ /  __/ | | | |_ "
+    log.info "| .__/|_|\\__,_|___/_| |_| |_\\___/|___/ \\___|_| |_|\\__|"
+    log.info "| |                                                   "
+    log.info "|_|                                                   "
 }
 
