@@ -1,13 +1,24 @@
-/**
-*
-*   RESITANCE PLASMID IDENTIFICATION PIPELINE
-*
-*   Nextflow pipeline to analyse assembled bacterial genomes 
-*   using long reads to identify circular plasmids with and
-*   antibiotical resistance genes
-*   Caspar Gross 2018
-* 
-**/
+#!/usr/bin/env/ nextflow
+
+/* 
+===============================================================================
+                              P L A S M I D E N T  
+===============================================================================
+Nextflow pipeline for resistance plasmid identification and annotation using 
+Nanopore reads and bacterial genome assemblies
+-------------------------------------------------------------------------------
+@ Author
+Caspar Groß <mail@caspar.one>
+-------------------------------------------------------------------------------
+@ Documentation
+https://github.com/caspargross/hybridassembly/README.md
+------------------------------------------------------------------------------
+*/
+
+// Check special input parameters
+if (params.help) exit 0, helpMessage()
+if (params.version) exit 0, pipelineMessage()
+if (!params.input) exit 0, helpMessage()
 
 // Setup
 samples = getFiles(params.input)
@@ -125,7 +136,6 @@ process combine_padded_contigs {
 }
 
 assembly_padded.into{map_padded; gc_padded}
-
 
 // Mix channel with padded and normal contigs
 samples_map
@@ -447,7 +457,7 @@ def helpMessage() {
   // Display help message
   // this.pipelineMessage()
   log.info "  Usage:"
-  log.info "       nextflow run caspargross/plasmident --input <file.csv> --mode <mode1,mode2...> [options] "
+  log.info "       nextflow run caspargross/plasmident --input <file.csv> [options] "
   log.info "    --input <file.tsv>"
   log.info "       TSV file containing paths to files (id | assembly | longread)"
   log.info "  Parameters: "
@@ -463,10 +473,10 @@ def helpMessage() {
   log.info "    Target coverage for long read sampling"
   log.info "    --noSubsampling"
   log.info "    Skips the read subsampling step. Use when read coverage is not uniform."
-  log.info "    --cpu <threads>"
-  log.info "    set max number of threads per process"
   log.info "    --version"
   log.info "      Displays pipeline version"
+  log.info "    --help"
+  log.info "      Displays this help"
   log.info "           "
   log.info "  Profiles:"
   log.info "    -profile local "
@@ -534,4 +544,3 @@ def asciiArt() {
     log.info "| |                                                   "
     log.info "|_|                                                   "
 }
-
