@@ -22,12 +22,9 @@ if (!params.input) exit 0, helpMessage()
 
 // Setup
 samples = getFiles(params.input)
-env = $params.env
+env = params.env
 startMessage()
 runParamCheck()
-
-// Duplicate channel
-samples.into{samples_rgi; samples_glimmer; samples_filter}
 
 process filter_reads {
 // Subsample large datasets to given target coverage
@@ -35,10 +32,10 @@ process filter_reads {
     tag{id}
 
     input:
-    set id, assembly, lr from samples_filter 
+    set id, lr, assembly from samples 
 
     output:
-    set id, assembly, file('reads_filtered.fastq') into samples_map, samples_split
+    set id, assembly, file('reads_filtered.fastq') into samples_filtered
 
     script:
     if (params.noSubsampling)
@@ -49,10 +46,13 @@ process filter_reads {
         """
         ${env}
         len=\$(grep -v '>' ${assembly} | wc -c)
-        nbases=\$(expr \$len * ${params.targetCov})
+        nbases=\$(expr \$len * ${params.mappingCov})
         filtlong -t \$nbases --length_weight 0 ${lr} > reads_filtered.fastq
         """
 }
+
+// Duplicate channel
+samples_filtered.into{samples_rgi; samples_glimmer; samples_map; samples_split}
 
 // Split into contigs and filter for length channel
 samples_split
@@ -165,7 +165,7 @@ process map_longreads {
     script:
     """
     ${env}
-    minimap2 -Y -P -ax map-ont -t ${params.cpu} ${assembly} ${lr} \
+    minimap2 -Y -P -ax map-ont -t ${task.cpus} ${assembly} ${lr} \
     | samtools sort | samtools view -b -F 4 -o  ${id}_${type}_lr.bam 
     samtools index ${id}_${type}_lr.bam ${id}_${type}_lr.bam.bai
     """
@@ -202,7 +202,7 @@ process find_ovlp_reads {
     
     bedtools bamtobed -i ovlp.bam > ovlp_extracted.bed
      
-    mosdepth -t ${params.cpu} -F 4 -n -b ${params.covWindow} ${contig_name} ovlp.bam
+    mosdepth -t ${task.cpus} -F 4 -n -b ${params.covWindow} ${contig_name} ovlp.bam
     gunzip -c ${contig_name}.regions.bed.gz > cov_ovlp.bed
     
     03_prepare_bed.R ovlp_extracted.bed ${params.seqPadding} ovlp.txt FALSE ${contig_name} ${length}
@@ -225,7 +225,7 @@ process identify_resistance_genes {
     script:
     """
     ${env}
-    rgi main -i ${assembly} -n ${params.cpu} -o ${id}_rgi
+    rgi main -i ${assembly} -n ${task.cpus} -o ${id}_rgi
     """
 }
 
@@ -263,7 +263,7 @@ process mos_depth {
     script:
     """
     ${env}
-    mosdepth -t ${params.cpu} -F 4  -n -b ${params.covWindow} ${id} ${aln_lr} 
+    mosdepth -t ${task.cpus} -F 4  -n -b ${params.covWindow} ${id} ${aln_lr} 
     mv ${id}.regions.bed.gz ${id}_cov_${type}.bed.gz
     """
 }
@@ -469,7 +469,7 @@ def helpMessage() {
   log.info "    Length of recycled sequences at contig edges for long read mapping."
   log.info "    --covWindow <bases> (Default: 50)"
   log.info "    Moving window size for coverage calculation"
-  log.info "    --targetCov <coverage> (Default: 50)"
+  log.info "    --mappingCov <coverage> (Default: 50)"
   log.info "    Target coverage for long read sampling"
   log.info "    --noSubsampling"
   log.info "    Skips the read subsampling step. Use when read coverage is not uniform."
@@ -507,7 +507,7 @@ def minimalInformationMessage() {
   log.info "Cov. window   : " + params.covWindow
   log.info "Max Plasm. Len: " + params.maxLength
   log.info "Min Plasm. Len: " + params.minLength
-  log.info "Target cov.   : " + params.targetCov
+  log.info "Target cov.   : " + params.mappingCov
   log.info "read sampling : " + !params.noSubsampling
   log.info "Containers    : " + workflow.container 
 }
