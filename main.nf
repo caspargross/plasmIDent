@@ -22,7 +22,7 @@ if (!params.input) exit 0, helpMessage()
 
 // Setup
 samples = getFiles(params.input)
-env = 'source activate PI_env'
+env = $params.env
 startMessage()
 runParamCheck()
 
