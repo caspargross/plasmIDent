@@ -120,7 +120,6 @@ process combine_padded_contigs {
 
 assembly_padded.into{map_padded; gc_padded}
 
-
 // Mix channel with padded and normal contigs
 samples_map
   //.view()
@@ -471,8 +470,6 @@ def helpMessage() {
 
 }
 
-
-
 def grabRevision() {
   // Return the same string executed from github or not
   return workflow.revision ?: workflow.commitId ?: workflow.scriptId.substring(0,10)
@@ -514,4 +511,3 @@ workflow.onComplete {
   log.info "Success     : " + workflow.success
   log.info "Exit status : " + workflow.exitStatus
 }
-
