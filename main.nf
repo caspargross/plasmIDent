@@ -32,10 +32,10 @@ process filter_reads {
     tag{id}
 
     input:
-    set id, lr, assembly from samples 
+    set id, assembly, lr from samples 
 
     output:
-    set id, assembly, file('reads_filtered.fastq') into samples_filtered
+    set id,  assembly, file('reads_filtered.fastq') into samples_filtered
 
     script:
     if (params.noSubsampling)
@@ -184,14 +184,14 @@ process find_ovlp_reads {
     set id, lr, contig_name, length, seq, file(assembly), type, bam, bai from contigs.combine(bam_ovlp.filter{it[2] == 'padded'}, by : 0)
 
     output:
-    set id, contig_name, length, file("reads.txt"), file("ovlp.txt"), file("cov_ovlp.txt") into circos_reads 
+    set id, contig_name, length, file("reads.txt"), file("ovlp.txt"), file("cov_ovlp.txt") optional true into circos_reads 
 
     script:
     """
     ${env}
     bedtools bamtobed -i ${bam} > reads.bed
-    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} )'\\t'\$(expr ${params.seqPadding} + 1) > breaks.bed
-    echo -e ${contig_name}'\\t'\$(expr ${length} + ${params.seqPadding} )'\\t'\$(expr ${length} + ${params.seqPadding} + 1) >> breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${params.seqPadding} - 10)'\\t'\$(expr ${params.seqPadding} + 10) > breaks.bed
+    echo -e ${contig_name}'\\t'\$(expr ${length} + ${params.seqPadding} - 10 )'\\t'\$(expr ${length} + ${params.seqPadding} + 10) >> breaks.bed
     samtools view -L breaks.bed -b ${bam} > region.bam
     intersectBed -wa -a reads.bed -b breaks.bed > ovlp.bed
     awk '{print \$4}' ovlp.bed | sort | uniq -D | uniq > readID.txt
@@ -433,7 +433,6 @@ def getFiles(tsvFile) {
       inputFile = file(tsvFile)
   }
   log.info "------------------------------"
-  log.info "Reading  input file: " + inputFile
   Channel.fromPath(inputFile)
       .ifEmpty {exit 1, log.info "Cannot find path file ${tsvFile}"}
       .splitCsv(sep:'\t')
@@ -497,6 +496,7 @@ def grabRevision() {
 def minimalInformationMessage() {
   // Minimal information message
   log.info "Command Line  : " + workflow.commandLine
+  log.info "Input file    : " + inputFile
   log.info "Profile       : " + workflow.profile
   log.info "Project Dir   : " + workflow.projectDir
   log.info "Launch Dir    : " + workflow.launchDir
